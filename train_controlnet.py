@@ -7,8 +7,9 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from PIL import Image
 from torch.utils.tensorboard import SummaryWriter
+import os
 
-writer = SummaryWriter(log_dir="./runs/exp1")
+writer = SummaryWriter(log_dir="./runs/run_overfit_1")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,8 +25,8 @@ controlnet = ControlNetModel.from_pretrained(pretrained_controlnet)
 
 optimizer = torch.optim.AdamW(controlnet.parameters(), lr=1e-5)
 
-source_dir = "./dataset/grayscale"
-target_dir = "./dataset/thermal"
+source_dir = "./dataset_1/grayscale"
+target_dir = "./dataset_1/thermal"
 
 class PairedDataset(torch.utils.data.Dataset):
     def __init__(self, source_dir, target_dir, image_size=512):
@@ -58,9 +59,20 @@ unet = unet.to(device)
 controlnet = controlnet.to(device)
 text_encoder = text_encoder.to(device)
 
+# Prepare validation grayscale image for inference
+validation_grayscale_path = "./dataset/grayscale/000026.png"
+validation_img = Image.open(validation_grayscale_path).convert("RGB")
+validation_tensor = dataset.transform(validation_img).unsqueeze(0).to(device)
+val_input_ids = tokenizer(
+    "", return_tensors="pt", padding="max_length", truncation=True, max_length=tokenizer.model_max_length
+).input_ids.to(device)
+
+checkpoint_dir = "./checkpoints"
+os.makedirs(checkpoint_dir, exist_ok=True)
+
 global_step = 0
 controlnet.train()
-for epoch in range(1):  # set your number of epochs
+for epoch in range(1001):  # set your number of epochs
     for batch in dataloader:
         optimizer.zero_grad()
         pixel_values = batch["pixel_values"].to(device)
@@ -105,6 +117,48 @@ for epoch in range(1):  # set your number of epochs
         # 6. Log loss to TensorBoard
         writer.add_scalar("Loss/train", loss.item(), global_step)
         logger.info(f"Step {global_step} Loss: {loss.item()}")
+
+        # 7. Save checkpoint every 100 steps
+        if global_step % 100 == 0 and global_step > 0:
+            ckpt_path = os.path.join(checkpoint_dir, f"controlnet_step_{global_step}.pt")
+            torch.save({
+                "controlnet": controlnet.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "step": global_step,
+            }, ckpt_path)
+            logger.info(f"Checkpoint saved at {ckpt_path}")
+
+            # --- Inference and log image to TensorBoard ---
+            with torch.no_grad():
+                val_encoder_hidden_states = text_encoder(val_input_ids)[0]
+                val_latents = vae.encode(validation_tensor).latent_dist.sample()
+                val_latents = val_latents * vae.config.scaling_factor
+                val_noise = torch.zeros_like(val_latents)
+                val_timesteps = torch.zeros((1,), dtype=torch.long, device=device)
+
+                val_down_block_res_samples, val_mid_block_res_sample = controlnet(
+                    val_latents,
+                    val_timesteps,
+                    encoder_hidden_states=val_encoder_hidden_states,
+                    controlnet_cond=validation_tensor,
+                    return_dict=False,
+                )
+                val_model_pred = unet(
+                    val_latents,
+                    val_timesteps,
+                    encoder_hidden_states=val_encoder_hidden_states,
+                    down_block_additional_residuals=[s for s in val_down_block_res_samples],
+                    mid_block_additional_residual=val_mid_block_res_sample,
+                    return_dict=False,
+                )[0]
+                val_denoised_latents = val_latents - val_model_pred
+                val_image = vae.decode(val_denoised_latents / vae.config.scaling_factor).sample
+                val_image = (val_image.clamp(-1, 1) + 1) / 2  # [-1,1] -> [0,1]
+                val_image = val_image.cpu()
+                writer.add_image("Validation/ground_truth", val_image[0], global_step)
+                writer.add_image("Validation/thermal_pred", val_image[0], global_step)
+                logger.info(f"Validation image logged at step {global_step}")
+
         global_step += 1
 
 logger.info("Training complete.")

@@ -1,0 +1,8 @@
+dataset/data/
+.venv/
+venv/
+synthesized_training_data/
+*.mp4
+*.pyc
+.vscode/
+.DS_Store

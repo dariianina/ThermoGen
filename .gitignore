@@ -6,3 +6,4 @@ synthesized_training_data/
 *.pyc
 .vscode/
 .DS_Store
+*.sbatch

@@ -9,7 +9,7 @@ from PIL import Image
 from torch.utils.tensorboard import SummaryWriter
 import os
 
-writer = SummaryWriter(log_dir="./runs/run_overfit_1")
+writer = SummaryWriter(log_dir="./runs/unet2d_grayscale2thermal_overfit1_L")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,11 +40,16 @@ class PairedDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.source_paths)
     def __getitem__(self, idx):
-        src = Image.open(self.source_paths[idx]).convert("RGB")
-        tgt = Image.open(self.target_paths[idx]).convert("RGB")
+        src = Image.open(self.source_paths[idx]).convert("L")
+        tgt = Image.open(self.target_paths[idx]).convert("L")
+        src_tensor = self.transform(src)  # shape [1, H, W]
+        tgt_tensor = self.transform(tgt)  # shape [1, H, W]
+        src_tensor = src_tensor.repeat(3, 1, 1)  # shape [3, H, W]
+        tgt_tensor = tgt_tensor.repeat(3, 1, 1)  # shape [3, H, W]
+
         return {
-            "conditioning_pixel_values": self.transform(src),
-            "pixel_values": self.transform(tgt),
+            "conditioning_pixel_values": src_tensor,
+            "pixel_values": tgt_tensor,
             "input_ids": tokenizer(
                 "", return_tensors="pt", padding="max_length", truncation=True, max_length=tokenizer.model_max_length
             ).input_ids[0]
@@ -60,9 +65,9 @@ controlnet = controlnet.to(device)
 text_encoder = text_encoder.to(device)
 
 # Prepare validation grayscale image for inference
-validation_grayscale_path = "./dataset/grayscale/000026.png"
-validation_img = Image.open(validation_grayscale_path).convert("RGB")
-validation_tensor = dataset.transform(validation_img).unsqueeze(0).to(device)
+validation_grayscale_path = "./dataset/grayscale/000000.png"
+validation_img = Image.open(validation_grayscale_path).convert("L")
+validation_tensor = dataset.transform(validation_img).unsqueeze(0).repeat(1, 3, 1, 1).to(device)
 val_input_ids = tokenizer(
     "", return_tensors="pt", padding="max_length", truncation=True, max_length=tokenizer.model_max_length
 ).input_ids.to(device)
@@ -119,7 +124,7 @@ for epoch in range(1001):  # set your number of epochs
         logger.info(f"Step {global_step} Loss: {loss.item()}")
 
         # 7. Save checkpoint every 100 steps
-        if global_step % 100 == 0 and global_step > 0:
+        if global_step % 100 == 1 and global_step > 0:
             ckpt_path = os.path.join(checkpoint_dir, f"controlnet_step_{global_step}.pt")
             torch.save({
                 "controlnet": controlnet.state_dict(),
@@ -155,8 +160,8 @@ for epoch in range(1001):  # set your number of epochs
                 val_image = vae.decode(val_denoised_latents / vae.config.scaling_factor).sample
                 val_image = (val_image.clamp(-1, 1) + 1) / 2  # [-1,1] -> [0,1]
                 val_image = val_image.cpu()
-                writer.add_image("Validation/ground_truth", val_image[0], global_step)
-                writer.add_image("Validation/thermal_pred", val_image[0], global_step)
+                writer.add_image("Validation/ground_truth", validation_tensor[0, 0:1, :, :], global_step)
+                writer.add_image("Validation/thermal_pred", val_image[0, 0:1, :, :], global_step)
                 logger.info(f"Validation image logged at step {global_step}")
 
         global_step += 1

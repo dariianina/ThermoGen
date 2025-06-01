@@ -4,6 +4,7 @@ from torchvision import transforms
 from PIL import Image
 from pathlib import Path
 import os
+from itertools import chain
 
 # --- Define U-Net (must match your training script) ---
 class SimpleUNet(nn.Module):
@@ -26,7 +27,7 @@ class SimpleUNet(nn.Module):
 
 # --- Config ---
 ckpt_path = "./ckpt_ftdrone_l1+perc/unet_step_401.pt"  # <- set to your best checkpoint
-output_dir = "./inference_outputs"
+output_dir = "./inference_v15_out"
 os.makedirs(output_dir, exist_ok=True)
 image_size = (440, 258)  # (width, height), match training
 
@@ -58,9 +59,16 @@ def infer_one(img_path, save_path=None):
     return pred_img
 
 # --- Example: infer on a folder of grayscale images ---
-test_dir = "./dataset/drone_data/grayscale"
-for img_path in Path(test_dir).glob("*.png"):
-    out_name = os.path.basename(img_path).replace(".png", "_thermal_pred.png")
+test_dir = "./inference_v15"
+image_paths = chain(
+    Path(test_dir).glob("*.png"),
+    Path(test_dir).glob("*.jpg"),
+    Path(test_dir).glob("*.jpeg"),
+)
+print(image_paths)
+for img_path in image_paths:
+    print(img_path)
+    out_name = os.path.basename(img_path)
     out_path = os.path.join(output_dir, out_name)
     infer_one(img_path, save_path=out_path)
     print(f"Inferred and saved: {out_path}")

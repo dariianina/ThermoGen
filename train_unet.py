@@ -8,29 +8,30 @@ from torchvision.utils import save_image
 from PIL import Image
 from torch.utils.tensorboard import SummaryWriter
 import os
+import lpips
 
 # --- Logging and TensorBoard ---
-writer = SummaryWriter(log_dir="./runs/unet_grayscale2thermal")
+writer = SummaryWriter(log_dir="./runs/unet_onlydrone_V4_l1+perc")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Paths and Hyperparameters ---
-source_dir = "./dataset_1/grayscale"
-target_dir = "./dataset_1/thermal"
-checkpoint_dir = "./checkpoints_unet"
+source_dir = "./dataset/drone_data/grayscale"
+target_dir = "./dataset/drone_data/thermal"
+checkpoint_dir = "./ckpt_unet_onlydrone_V4_l1+perc"
 os.makedirs(checkpoint_dir, exist_ok=True)
-batch_size = 1
+batch_size = 64
 num_epochs = 2000
 lr = 1e-3
-image_size = 256
+image_size = (440, 258)
 
 # --- Dataset ---
 class PairedDataset(Dataset):
-    def __init__(self, source_dir, target_dir, image_size=256):
-        self.source_paths = sorted(list(Path(source_dir).glob("*.png")))
-        self.target_paths = sorted(list(Path(target_dir).glob("*.png")))
+    def __init__(self, source_dir, target_dir, image_size=(256, 256)):
+        self.source_paths = sorted(list(Path(source_dir).glob("*.png")) + list(Path(source_dir).glob("*.bmp")))
+        self.target_paths = sorted(list(Path(target_dir).glob("*.png")) + list(Path(target_dir).glob("*.bmp")))
         self.transform = transforms.Compose([
-            transforms.Resize((image_size, image_size)),
+            transforms.Resize((image_size[1], image_size[0])),
             transforms.ToTensor(),
         ])
     def __len__(self):
@@ -69,21 +70,22 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = SimpleUNet().to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 criterion = nn.L1Loss()
+lpips_loss = lpips.LPIPS(net='vgg').to(device)
 
 # --- Validation Sample ---
-validation_grayscale_path = "./dataset/grayscale/000000.png"
-validation_thermal_path = "./dataset/thermal/000000.png" 
+validation_grayscale_path = "./dataset/drone_data/grayscale/000026.png"
+validation_thermal_path = "./dataset/drone_data/thermal/000026.png"
 
 validation_img = Image.open(validation_grayscale_path).convert("L")
 validation_thermal_img = Image.open(validation_thermal_path).convert("L")
 
 val_tensor = transforms.Compose([
-    transforms.Resize((image_size, image_size)),
+    transforms.Resize((image_size[1], image_size[0])),
     transforms.ToTensor(),
 ])(validation_img).unsqueeze(0).to(device)  # [1, 1, H, W]
 
 val_thermal_tensor = transforms.Compose([
-    transforms.Resize((image_size, image_size)),
+    transforms.Resize((image_size[1], image_size[0])),
     transforms.ToTensor(),
 ])(validation_thermal_img).unsqueeze(0).to(device)
 
@@ -95,13 +97,18 @@ for epoch in range(num_epochs):
         src, tgt = src.to(device), tgt.to(device)
         optimizer.zero_grad()
         pred = model(src)
-        loss = criterion(pred, tgt)
-        loss.backward()
+        l1 = criterion(pred, tgt)
+        # LPIPS expects 3 channels, so repeat to [B, 3, H, W]
+        pred_lpips = pred.repeat(1, 3, 1, 1)
+        tgt_lpips = tgt.repeat(1, 3, 1, 1)
+        perceptual = lpips_loss(pred_lpips, tgt_lpips).mean()
+        total_loss = l1 + 0.1 * perceptual  # You can tune the weight
+        total_loss.backward()
         optimizer.step()
 
-        writer.add_scalar("Loss/train", loss.item(), global_step)
+        writer.add_scalar("Loss/train", total_loss.item(), global_step)
         if global_step % 10 == 0:
-            logger.info(f"Epoch {epoch} Step {global_step} Loss: {loss.item()}")
+            logger.info(f"Epoch {epoch} Step {global_step} Loss: {total_loss.item()}")
 
         # --- Save checkpoint and log validation every 100 steps ---
         if global_step % 100 == 0 and global_step > 0:

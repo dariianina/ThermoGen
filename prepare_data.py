@@ -105,9 +105,9 @@ if __name__ == "__main__":
     # Define paths
     grayscale_video = "./data/gray_clipped.mp4"
     thermal_video = "./data/lynred_clipped.mp4"
-    out_gray_dir = "./output/gray_clipped"
-    out_thermal_dir = "./output/lynred_clipped"
+    out_gray_dir = "./output/grayscale"
+    out_thermal_dir = "./output/thermal"
     zoom_factor = 1.45
     shift = (-12, -16)
-    every_nth = 6
+    every_nth = 60
     extract_matched_frames(grayscale_video, thermal_video, out_gray_dir, out_thermal_dir, zoom_factor, shift, every_nth)

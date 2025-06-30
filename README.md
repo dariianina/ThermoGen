@@ -1,6 +1,6 @@
 # Munich Defense Systems Hack 2025 Submission
 # ThermoGen: Generation of thermal images from RGB, greyscale or pure noise.
-Team project at Munich Defense Systems Hackaton 2025. We aim to generate thermal images to enlargen scarce existing datasets. We leverage the semantic information about the objects and high accuracy of object masking obtained with GroundedSAM model. Thermal images are generated from pure noise or using the segmentation information and coarse simple text prompts or rgb data
+Team project at Munich Defense Systems Hackaton 2025. We aim to generate thermal images to enlargen scarce existing datasets. We leverage the semantic information about the objects and high accuracy of object masking obtained with GroundedSAM model. Thermal images are generated from pure noise or using the segmentation information and coarse simple text prompts or rgb data.
 
 <div align="center">
 
